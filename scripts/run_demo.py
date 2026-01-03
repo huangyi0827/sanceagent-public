@@ -9,7 +9,6 @@ sys.path.append(str(ROOT))
 import pandas as pd
 from vendor.GeneralBacktest.backtest import GeneralBacktest
 
-from src.data.csv_provider import CsvDataProvider
 from src.agent.sance_public_agent import SanCePublicAgent, SanCePublicConfig
 
 
@@ -17,7 +16,12 @@ def safe_mkdir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
 
-def make_equal_weight_benchmark(universe, prices, start, end):
+def make_equal_weight_benchmark(universe: pd.DataFrame, prices: pd.DataFrame, start: str, end: str):
+    """
+    Buy & Hold equal-weight benchmark:
+    - Build once at the first trading day within [start, end]
+    - Hold weights constant
+    """
     codes = universe["code"].astype(str).unique().tolist()
     if len(codes) == 0:
         return pd.DataFrame(columns=["date", "code", "weight"])
@@ -31,80 +35,76 @@ def make_equal_weight_benchmark(universe, prices, start, end):
         first_day = start_dt
 
     w = 1.0 / len(codes)
-    bench = pd.DataFrame({"date": [first_day] * len(codes), "code": codes, "weight": [w] * len(codes)})
-    return bench
+    return pd.DataFrame({"date": [first_day] * len(codes), "code": codes, "weight": [w] * len(codes)})
 
 
 def main():
     import argparse
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="configs/sance_public.yaml")
+    ap.add_argument("--config", default="config/sance_public.yaml")
     ap.add_argument("--outdir", default="outputs")
     args = ap.parse_args()
 
-    cfg = yaml.safe_load(open(args.config, "r"))
+    cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
 
     outdir = ROOT / args.outdir
     safe_mkdir(outdir)
-    safe_mkdir(outdir / "audit")
 
-    provider = CsvDataProvider(root=Path(cfg.get("data_root", "demo_data")))
-    universe = provider.load_universe()
-    prices = provider.load_prices()
-
-    # Commit-4 default: load all 6 factors (provider handles schema differences)
-    factor_names = cfg.get(
-        "factor_names",
-        [
-            "sector_sentiment",
-            "retail_sentiment",
-            "narrative_price_gap",
-            "policy_sent_gap",
-            "macro_liquidity",
-            "news_tda",
-        ],
-    )
-    factors = provider.load_factors(list(factor_names))
-
+    # --- Agent config mapping (robust to missing keys) ---
     agent_cfg = SanCePublicConfig(
-        start=cfg["start"],
-        end=cfg["end"],
+        start=str(cfg["start"]),
+        end=str(cfg["end"]),
+
         rebalance_mode=str(cfg.get("rebalance_mode", "week_end")),
-        include_first_rebalance=bool(cfg.get("include_first_rebalance", True)),
-        score_weights=dict(cfg.get("score_weights", {})) or None,
-        use_price_mom=bool(cfg.get("use_price_mom", True)),
-        mom_lookback=int(cfg.get("mom_lookback", 20)),
-        mom_weight=float(cfg.get("mom_weight", 0.2)),
-        base_topk=int(cfg.get("topk", cfg.get("base_topk", 10))),
-        base_softmax_temp=float(cfg.get("softmax_temp", cfg.get("base_softmax_temp", 0.8))),
+        rebalance_freq=int(cfg.get("rebalance_freq", 5)),
+
+        topn=int(cfg.get("topn", cfg.get("topN", 10))),
+        sticky_buffer=int(cfg.get("sticky_buffer", 5)),
         min_weight=float(cfg.get("min_weight", 0.01)),
         no_trade_band=float(cfg.get("no_trade_band", 0.02)),
-        sticky_buffer=int(cfg.get("sticky_buffer", 2)),
+
+        w_story_gap=float(cfg.get("w_story_gap", 1.0)),
+        w_policy_contra=float(cfg.get("w_policy_contra", 1.0)),
+        w_sector_sent=float(cfg.get("w_sector_sent", 0.6)),
+        w_news_tda=float(cfg.get("w_news_tda", 0.4)),
+        w_liquidity=float(cfg.get("w_liquidity", 0.3)),
+        w_retail_overheat=float(cfg.get("w_retail_overheat", -0.5)),
+
+        demo_data_dir=str(cfg.get("demo_data_dir", "demo_data")),
+        factors_subdir=str(cfg.get("factors_subdir", "factors")),
         audit_dir=str(outdir / "audit"),
     )
 
     agent = SanCePublicAgent(agent_cfg)
-    weights_df = agent.generate_weights(universe, prices, factors)
 
+    # --- Load data ---
+    universe = agent.load_universe()
+    prices = agent.load_prices()
+
+    # --- Generate weights ---
+    weights_df = agent.generate_weights(universe, prices)
     weights_path = outdir / "weights.csv"
     weights_df.to_csv(weights_path, index=False)
 
-    # Benchmark: equal-weight buy&hold
-    bench_weights = make_equal_weight_benchmark(universe, prices, cfg["start"], cfg["end"])
-    bench_weights.to_csv(outdir / "benchmark_equal_weight.csv", index=False)
+    # --- Benchmark: equal-weight buy&hold ---
+    bench_weights = make_equal_weight_benchmark(universe, prices, agent_cfg.start, agent_cfg.end)
+    bench_weights_path = outdir / "benchmark_equal_weight.csv"
+    bench_weights.to_csv(bench_weights_path, index=False)
 
-    # Backtest
-    bt = GeneralBacktest(start_date=cfg["start"], end_date=cfg["end"])
+    # --- Backtest ---
+    bt = GeneralBacktest(start_date=agent_cfg.start, end_date=agent_cfg.end)
+
     res = bt.run_backtest(
         weights_data=weights_df,
         price_data=prices,
-        buy_price=cfg.get("buy_price", "open"),
-        sell_price=cfg.get("sell_price", "close"),
-        adj_factor_col=cfg.get("adj_factor_col", "adj_factor"),
-        close_price_col=cfg.get("close_price_col", "close"),
-        date_col=cfg.get("date_col", "date"),
-        asset_col=cfg.get("asset_col", "code"),
-        weight_col=cfg.get("weight_col", "weight"),
+        buy_price=str(cfg.get("buy_price", "open")),
+        sell_price=str(cfg.get("sell_price", "close")),
+        adj_factor_col=str(cfg.get("adj_factor_col", "adj_factor")),
+        close_price_col=str(cfg.get("close_price_col", "close")),
+        date_col=str(cfg.get("date_col", "date")),
+        asset_col=str(cfg.get("asset_col", "code")),
+        weight_col=str(cfg.get("weight_col", "weight")),
         rebalance_threshold=float(cfg.get("rebalance_threshold", 0.005)),
         transaction_cost=list(cfg.get("transaction_cost", [0.001, 0.001])),
         initial_capital=float(cfg.get("initial_capital", 1.0)),
@@ -113,8 +113,10 @@ def main():
         benchmark_name=str(cfg.get("benchmark_name", "EqualWeight")),
     )
 
+    # --- Save outputs (DataFrame/Series -> csv, others -> json-safe) ---
     json_path = outdir / "backtest_result.json"
     serializable = {}
+
     for k, v in res.items():
         if isinstance(v, pd.DataFrame):
             v.to_csv(outdir / f"{k}.csv", index=False)
@@ -129,13 +131,15 @@ def main():
             except TypeError:
                 serializable[k] = str(v)
 
-    json.dump(serializable, open(json_path, "w"), ensure_ascii=False, indent=2)
+    json.dump(serializable, open(json_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
     print("✅ Done.")
     print("Weights saved to:", weights_path)
-    print("Backtest result index saved to:", json_path)
-    print("Audit log:", outdir / "audit" / "audit.jsonl")
+    print("Benchmark weights saved to:", bench_weights_path)
+    print("Backtest index saved to:", json_path)
     print("Outputs dir:", outdir)
+    if (outdir / "audit" / "audit.jsonl").exists():
+        print("Audit trail:", outdir / "audit" / "audit.jsonl")
 
 
 if __name__ == "__main__":
