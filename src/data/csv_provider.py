@@ -2,57 +2,91 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 
-# Strategy semantic name -> file + schema
+GLOBAL_CODE = "__ALL__"  # sentinel for date-only factors
+
+
 FACTOR_SPECS: Dict[str, Dict[str, Any]] = {
-    # ETF-level (date+code) factors
+    # ETF-level multi-column
     "sector_sentiment": {
         "file": "etf_sector_sentiment_factor.csv",
         "date_col": "date",
         "code_col": "code",
-        "value_col": "sina_sector_sentiment",
+        "value_candidates": [
+            "sina_sector_sentiment",
+            "sina_sector_pos_ratio_20d",
+            "sina_sector_sentiment_raw",
+        ],
     },
 
-    # Date-only (macro / market-wide) factors: broadcast to all codes
-    "news_tda": {
-        "file": "news_tda_factor.csv",
+    # date-only (no code): broadcast to all codes
+    "retail_sentiment": {
+        "file": "retail_sentiment_factor.csv",
         "date_col": "date",
         "code_col": None,
-        "value_col": "news_tda_score",
+        "value_candidates": [
+            "retail_overheat_z",
+            "retail_heat_raw",
+            "east_score",
+            "sina_score",
+        ],
     },
 
-    # You can fill these when you confirm headers; below are sensible defaults:
-    "macro_liquidity": {
-        "file": "macro_liquidity_factor.csv",
-        "date_col": "date",
-        "code_col": None,
-        "value_col": "liq_20d",   # your earlier example had liq_raw, liq_20d
-    },
+    # ETF-level (code is present, though it's the last column in your CSV)
     "narrative_price_gap": {
         "file": "etf_narrative_vs_price_gap_factor.csv",
         "date_col": "date",
         "code_col": "code",
-        "value_col": "value",
+        "value_candidates": [
+            "gap_score",
+            "gap_pct",
+            "story_z",
+            "price_mom_z",
+            "story_score",
+        ],
     },
+
+    # ETF-level
     "policy_sent_gap": {
         "file": "etf_policy_vs_sent_gap_factor.csv",
         "date_col": "date",
         "code_col": "code",
-        "value_col": "value",
+        "value_candidates": [
+            "sent_minus_policy_gap",
+            "contrarian_score",
+            "sent_z",
+            "policy_z",
+            "policy_score",
+        ],
     },
-    "retail_sentiment": {
-        "file": "retail_sentiment_factor.csv",
+
+    # date-only
+    "macro_liquidity": {
+        "file": "macro_liquidity_factor.csv",
         "date_col": "date",
-        "code_col": "code",
-        "value_col": "value",
+        "code_col": None,
+        "value_candidates": ["liq_20d", "liq_raw"],
+    },
+
+    # date-only
+    "news_tda": {
+        "file": "news_tda_factor.csv",
+        "date_col": "date",
+        "code_col": None,
+        "value_candidates": ["news_tda_score"],
     },
 }
 
-GLOBAL_CODE = "__ALL__"  # sentinel for date-only factors
+
+def _pick_value_col(df: pd.DataFrame, candidates: List[str], fp_name: str) -> str:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise ValueError(f"{fp_name} missing value column. tried={candidates}, got={list(df.columns)}")
 
 
 @dataclass
@@ -89,12 +123,10 @@ class CsvDataProvider:
 
         date_col = spec["date_col"]
         code_col: Optional[str] = spec.get("code_col")
-        value_col = spec["value_col"]
+        value_col = _pick_value_col(df, spec["value_candidates"], fp.name)
 
         if date_col not in df.columns:
             raise ValueError(f"{fp.name} missing date_col '{date_col}'. got={list(df.columns)}")
-        if value_col not in df.columns:
-            raise ValueError(f"{fp.name} missing value_col '{value_col}'. got={list(df.columns)}")
 
         out = pd.DataFrame()
         out["date"] = pd.to_datetime(df[date_col])
