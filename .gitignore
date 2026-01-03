@@ -210,3 +210,6 @@ __marimo__/
 demo_data/prices.csv
 outputs/
 .DS_Store
+
+# local backup (do not commit)
+demo_data/_local_backup/
