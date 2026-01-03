@@ -9,8 +9,8 @@ BACKUP = ROOT / "demo_data" / "_local_backup"  # place big csv here
 FACTORS = ROOT / "demo_data" / "factors"       # output demo csv here
 
 # ---- demo controls ----
-START = "2024-01-01"
-END = "2025-12-31"
+START = "2023-01-01"
+END = "2024-11-10"
 MAX_CODES = 20  # keep top-N codes by coverage
 
 DATE_COL_CAND = ["date", "trade_date", "dt"]
