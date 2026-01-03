@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# demo data (do not commit large files)
+demo_data/prices.csv
+outputs/
+.DS_Store
