@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 140
+exclude = [
+  "vendor",
+  "demo_data",
+  "outputs",
+  ".venv",
+  "__pycache__",
+  ".git",
+]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]
