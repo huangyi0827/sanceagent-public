@@ -1,0 +1,35 @@
+start: "2022-01-03"
+end: "2025-12-26"
+
+# Weekly rebalance aligned to Friday-close style:
+# public implementation uses "week end trading day" (usually Fri; holiday -> last trading day of week)
+rebalance_mode: "week_end"
+
+include_first_rebalance: true
+topk: 10
+softmax_temp: 0.8
+min_weight: 0.01
+
+# Factor weights (public CSV factors)
+factor_weights:
+  sector_sentiment: 0.6
+  retail_sentiment: 0.4
+
+# Optional: add a simple price momentum term (public, reproducible)
+use_price_mom: true
+mom_lookback: 20
+mom_weight: 0.2
+
+# Backtest fields (match demo_data/prices.csv)
+buy_price: "open"
+sell_price: "close"
+adj_factor_col: "adj_factor"
+close_price_col: "close"
+date_col: "date"
+asset_col: "code"
+weight_col: "weight"
+
+rebalance_threshold: 0.005
+transaction_cost: [0.001, 0.001]   # [buy_cost, sell_cost]
+initial_capital: 1.0
+slippage: 0.0
