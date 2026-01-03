@@ -218,3 +218,5 @@ demo_data/_local_backup/
 /demo_data/_local_backup/
 /demo_data/prices.csv
 /demo_data/universe.csv
+
+.DS_Store
