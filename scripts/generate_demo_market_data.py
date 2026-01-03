@@ -10,21 +10,27 @@ OUT_UNIVERSE = ROOT / "demo_data" / "universe.csv"
 OUT_PRICES = ROOT / "demo_data" / "prices.csv"
 
 
-def _read_factor_csv(fp: Path) -> pd.DataFrame:
-    df = pd.read_csv(fp)
+def _norm_cols(df: pd.DataFrame):
     cols = {c.lower(): c for c in df.columns}
-
     date_col = cols.get("date") or cols.get("trade_date") or cols.get("dt")
     code_col = cols.get("code") or cols.get("ticker") or cols.get("symbol")
+    return date_col, code_col
 
-    if date_col is None or code_col is None:
-        raise ValueError(f"{fp.name} must have date/code columns; got: {list(df.columns)}")
 
-    out = df[[date_col, code_col]].copy()
-    out.columns = ["date", "code"]
-    out["date"] = pd.to_datetime(out["date"])
-    out["code"] = out["code"].astype(str)
-    return out
+def _read_dates_and_optional_codes(fp: Path) -> tuple[pd.Series, pd.Series | None]:
+    df = pd.read_csv(fp)
+    date_col, code_col = _norm_cols(df)
+
+    if date_col is None:
+        raise ValueError(f"{fp.name} must have a date column; got: {list(df.columns)}")
+
+    dates = pd.to_datetime(df[date_col])
+
+    if code_col is None:
+        return dates, None
+
+    codes = df[code_col].astype(str)
+    return dates, codes
 
 
 def main(seed: int = 7) -> None:
@@ -34,23 +40,38 @@ def main(seed: int = 7) -> None:
     if not files:
         raise FileNotFoundError(f"No factor CSV found under {FACTORS_DIR}")
 
-    all_dc = [_read_factor_csv(Path(f)) for f in files]
-    dc = pd.concat(all_dc, ignore_index=True).drop_duplicates()
+    all_dates = []
+    all_codes = []
 
-    codes = sorted(dc["code"].unique().tolist())
-    start = dc["date"].min()
-    end = dc["date"].max()
+    for f in files:
+        fp = Path(f)
+        dates, codes = _read_dates_and_optional_codes(fp)
+        all_dates.append(dates)
+        if codes is not None:
+            all_codes.append(codes)
+
+    dates = pd.concat(all_dates, ignore_index=True)
+    start = dates.min()
+    end = dates.max()
     if pd.isna(start) or pd.isna(end):
         raise ValueError("Cannot infer date range from factor CSVs")
 
-    dates = pd.bdate_range(start, end)
+    if not all_codes:
+        raise ValueError(
+            "Cannot infer universe: no factor CSV contains a code/ticker/symbol column."
+        )
+
+    codes = sorted(pd.concat(all_codes, ignore_index=True).dropna().astype(str).unique().tolist())
+
+    # Use business days as trading calendar
+    cal = pd.bdate_range(start, end)
 
     OUT_UNIVERSE.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"code": codes}).to_csv(OUT_UNIVERSE, index=False)
 
     rows = []
     for code in codes:
-        n = len(dates)
+        n = len(cal)
         base = (abs(hash(code)) % 1000) / 1000.0
 
         drift = 0.00010 + 0.00015 * base
@@ -66,7 +87,7 @@ def main(seed: int = 7) -> None:
         rows.append(
             pd.DataFrame(
                 {
-                    "date": dates,
+                    "date": cal,
                     "code": code,
                     "open": open_,
                     "close": close,
@@ -80,7 +101,7 @@ def main(seed: int = 7) -> None:
 
     print("✅ Wrote:", OUT_UNIVERSE)
     print("✅ Wrote:", OUT_PRICES)
-    print("codes:", len(codes), "| dates:", len(dates))
+    print("codes:", len(codes), "| dates:", len(cal))
 
 
 if __name__ == "__main__":
