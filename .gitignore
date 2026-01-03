@@ -213,3 +213,8 @@ outputs/
 
 # local backup (do not commit)
 demo_data/_local_backup/
+
+# keep repo small
+/demo_data/_local_backup/
+/demo_data/prices.csv
+/demo_data/universe.csv
